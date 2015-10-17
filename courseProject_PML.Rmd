@@ -1,0 +1,201 @@
+---
+title: "Course Project - Practical Machine Learning"
+author: "Huy Tran"
+date: "October 14, 2015"
+output: html_document
+---
+
+### Project Descriptions
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, **_I will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, and predict the manner in which they did the exercise_**.They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The content of the report will consist of:
+- How the model is built
+- How cross validation is used - and, What the expected out of sample error is
+
+Finally, I will also use your prediction model to predict 20 different test cases.
+
+### 1. How the model is built:
+
+#### **Data Reading**:
+
+The firts step taken was to download the training and test data for this analysis come in the form of a comma-separated-value file, from the course web site. And, then the data is read to R for analysis.
+
+And, Select all accelerometers variables which begin with "accel" and the outcome variable "classe"
+```{r}
+#downloading the training data 
+if (!file.exists("pml-training.csv")) {
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                  destfile = "pml-training.csv")
+}
+#downloading the testing data 
+if (!file.exists("pml-testing.csv.csv")) {
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                  destfile = "pml-testing.csv")
+}
+#reading de training and testing data
+pml_training<-read.csv("pml-training.csv")
+pml_testing<-read.csv("pml-testing.csv")
+
+varnames <- names(pml_training)
+subsetnames <- grep("^accel|classe",varnames)
+
+#creating a subset with the variables selected
+training<- subset(pml_training,select=subsetnames)
+
+names<-names(pml_testing)
+subsetnames<-grep("^accel|classe",names)
+
+#creating a subset with the variables selected
+testing<-subset(pml_testing,select=subsetnames)
+```
+
+
+```{r, echo=FALSE}
+#### Loading neccessary libraries for data exploratory and processing:
+if(!require("lattice")){
+  install.packages("lattice", repos="http://cran.rstudio.com/")
+}
+library("lattice")
+
+if(!require("ggplot2")){
+  install.packages("ggplot2", repos="http://cran.rstudio.com/")
+}
+library("ggplot2")
+
+if(!require("caret")){
+  install.packages("caret", repos="http://cran.rstudio.com/")
+}
+library("caret")
+
+if(!require("corrplot")){
+  install.packages("corrplot")
+}
+library("corrplot")
+
+if(!require("AppliedPredictiveModeling")){
+  install.packages("AppliedPredictiveModeling")
+}
+library("AppliedPredictiveModeling")
+
+```
+
+#### **Checking nearZero variance variables**
+
+```{r}
+nearZeroVar(training)
+```
+
+This result is showing that none of the variables is having variance near Zero.
+
+#### **Filtering high correlated variables**
+
+```{r}
+correlations <- cor(training[,-13]) #except the classe as outcome variable 
+corrplot::corrplot(correlations, order="hclust")
+```
+
+From the result/plot, we remove the highly pair-wise correlations.
+```{r}
+highCorr <- findCorrelation(correlations, cutoff = 0.75)
+filteredtraining <- training[,-highCorr]
+filteredtesting <- testing[,-highCorr]
+```
+
+#### **Data visualization Analysis**
+
+```{r}
+library(AppliedPredictiveModeling)
+transparentTheme(trans = .4)
+trellis.par.set(theme = col.whitebg(), warn = FALSE)
+library(caret)
+
+featurePlot(x = filteredtraining[, 1:2],
+             y = filteredtraining[,12],
+             plot = "pairs",
+             ## Add a key at the top
+             auto.key = list(columns = 3))
+
+featurePlot(x = filteredtraining[, 3:5],
+             y = filteredtraining[,12],
+             plot = "pairs",
+             ## Add a key at the top
+             auto.key = list(columns = 3))
+
+featurePlot(x = filteredtraining[, 6:8],
+             y = filteredtraining[,12],
+             plot = "pairs",
+             ## Add a key at the top
+             auto.key = list(columns = 3))
+
+featurePlot(x = filteredtraining[, 9:11],
+             y = filteredtraining[,12],
+             plot = "pairs",
+             ## Add a key at the top
+             auto.key = list(columns = 3))
+```
+
+```{r}
+featurePlot(x = filteredtraining[,-12],
+                  y = filteredtraining[,12],
+                  plot = "box",
+                  ## Pass in options to bwplot() 
+                  scales = list(y = list(relation="free"),
+                                x = list(rot = 90)),
+                  layout = c(4,3),
+                  auto.key = list(columns = 2))
+```
+
+**_From the characteristic noise in the sensor data as we found on the visualization analysis, we use a Random Forest approach. This algorithm is characterized by a subset of features, selected in a random and independent manner with the same distribution for each of the trees in the forest._**
+
+### 2. How cross validation is used:
+
+In order to perform cross-validation, the training data set is partionned into 2 sets: subTraining (75%) and subTest (25%). This will be performed using random subsampling without replacement.
+
+```{r}
+set.seed(111)
+inTrain <- createDataPartition(filteredtraining$classe, p=.75, list=FALSE)
+subtraining <- filteredtraining[inTrain,]
+subtesting <- filteredtraining[-inTrain,]
+```
+
+Preprocess the training data
+```{r}
+set.seed(111)
+preProc95 <- preProcess(subtraining[, -12], method = c("center","scale","pca"), thresh = 0.95)
+trainingPC <- predict(preProc95, subtraining[, -12])
+testingPC <- predict(preProc95, subtesting[, -12])
+```
+
+Building model fit
+
+```{r}
+set.seed(111)
+
+modelfit <- train(subtraining$classe ~., method = "rf", data = trainingPC
+                  ,trControl = trainControl(method = "oob",  number = 4)
+                  ,importance = TRUE)
+
+summary(modelfit)
+```
+
+Cross-validating on the validation sample data.
+
+The model fit is adjust via the control method to select the most performed models,
+Here is the confusion matrix and the statistics result of the selected model fit:
+
+```{r}
+confusionMatrix(subtesting$classe,predict(modelfit,testingPC))
+```
+
+### 3. Using prediction model to predict 20 different test cases:
+
+checking result on testing set
+```{r}
+trans_testing <- predict(preProc95,filteredtesting[,-12])
+predicted<-predict(modelfit,newdata=trans_testing)
+predicted
+```
+
