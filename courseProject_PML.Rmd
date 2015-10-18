@@ -175,15 +175,15 @@ Building model fit
 set.seed(111)
 
 modelfit <- train(subtraining$classe ~., method = "rf", data = trainingPC
-                  ,trControl = trainControl(method = "oob",  number = 4)
+                  ,trControl = trainControl(method = "cv",  number = 5)
                   ,importance = TRUE)
 
-summary(modelfit)
+plot(modelfit)
+modelfit
 ```
 
-Cross-validating on the validation sample data.
+5-fold Cross-validating has been done, the best performance model is selected basing on the accuracy rate estimate.
 
-The model fit is adjust via the control method to select the most performed models,
 Here is the confusion matrix and the statistics result of the selected model fit:
 
 ```{r}
